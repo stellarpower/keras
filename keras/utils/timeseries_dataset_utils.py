@@ -10,6 +10,7 @@ from keras.utils.module_utils import tensorflow as tf
         "keras.preprocessing.timeseries_dataset_from_array",
     ]
 )
+
 def timeseries_dataset_from_array(
     data,
     targets,
@@ -21,6 +22,7 @@ def timeseries_dataset_from_array(
     seed=None,
     start_index=None,
     end_index=None,
+    single_target_value = False
 ):
     """Creates a dataset of sliding windows over a timeseries provided as array.
 
@@ -216,7 +218,11 @@ def timeseries_dataset_from_array(
 
     positions_ds = tf.data.Dataset.from_tensors(start_positions).repeat()
 
+    # Handle the input data
+
     # For each initial window position, generates indices of the window elements
+    # This generates just indices for the data input first; the targets are handled differently,
+    # depending on whether single_target_value is set or not.
     indices = tf.data.Dataset.zip(
         (tf.data.Dataset.range(len(start_positions)), positions_ds)
     ).map(
@@ -229,17 +235,31 @@ def timeseries_dataset_from_array(
     )
 
     dataset = sequences_from_indices(data, indices, start_index, end_index)
+
+
+    # Now the targets
+
     if targets is not None:
-        indices = tf.data.Dataset.zip(
-            (tf.data.Dataset.range(len(start_positions)), positions_ds)
-        ).map(
-            lambda i, positions: positions[i],
-            num_parallel_calls=tf.data.AUTOTUNE,
-        )
+        # If we only want one value in the target data for each window,
+        # Genrate new indices
+        if single_target_value:
+            indices = tf.data.Dataset.zip(
+                (tf.data.Dataset.range(len(start_positions)), positions_ds)
+            ).map(
+                lambda i, positions: positions[i],
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
+
+        # Else we will just re-use the ones for the data input
+            
+        # NOw slice the targets using either set
         target_ds = sequences_from_indices(
             targets, indices, start_index, end_index
         )
+
+        # And zip them together for the full set of data => targets
         dataset = tf.data.Dataset.zip((dataset, target_ds))
+
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     if batch_size is not None:
         if shuffle:
@@ -250,6 +270,7 @@ def timeseries_dataset_from_array(
         if shuffle:
             dataset = dataset.shuffle(buffer_size=1024, seed=seed)
     return dataset
+
 
 
 def sequences_from_indices(array, indices_ds, start_index, end_index):
